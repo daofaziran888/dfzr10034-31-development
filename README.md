@@ -81,5 +81,25 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+### 保留清理的分区与调查例外
+
+保留清理按「计划 → 按月分区」组织，领域逻辑在 `app/services/retention_job.py`：
+
+- `POST /api/retention_job/{id}/partitions`：登记分区（`{"partitions":[{"分区":"2026-05","数据行数":120000,"截止日":"2026-05-31"}]}`），
+  截止日默认取月末；重跑登记时保留已释放行数，不重置清理进度。
+- `POST /api/retention_job/{id}/holds`：按调查申请登记暂缓
+  （`partition` / `request_id` / `reason` / `start` / `end` / `asset`）。
+  只有同一资产、且调查申请日期范围完整覆盖该分区时才冻结，其它分区照常清理。
+- `POST /api/retention_job/{id}/dry-run`：预演并重算可释放范围（可传 `as_of` 固定基准日），
+  返回 `will_clean`（本轮可释放）、`held_rows`（暂缓留存）、`released_rows`（历史已释放）、
+  `due/held/not_due` 分区清单和 `validation`（仍有效的调查范围核对结论）。
+- `POST /api/retention_job/{id}/execute`：只释放执行时仍在可释放范围内的分区，
+  已释放行不会重复释放；传 `max_partitions` 可模拟中途中断，再次调用即从剩余范围恢复。
+- `GET /api/retention_job/{id}/cleanup-report?as_of=`：清理明细、留存行数、有效调查范围、
+  执行批次与释放审计，供清理员单独核对。
+
+示例数据 `RETE-0001` 就是一次中断后的现场：五月被调查申请暂缓、六月已释放 98000 行、
+七月尚未到期；在工作台点「预演清理」或「清理对账」可直接复核。
+
 领域：数据工程
 子方向：数仓与数据湖

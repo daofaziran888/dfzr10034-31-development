@@ -60,6 +60,15 @@
             >
               {{ action }}
             </button>
+            <button
+              v-if="meta.key === 'retention_job'"
+              class="link"
+              type="button"
+              :data-testid="`report-${row.id}`"
+              @click="showCleanupReport(row)"
+            >
+              清理对账
+            </button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -86,6 +95,39 @@
       </form>
     </div>
 
+    <section v-if="meta.key === 'retention_job' && cleanupReport" class="cleanup-panel" data-testid="cleanup-report">
+      <h3>清理对账 · {{ cleanupReport.asset }}</h3>
+      <p class="page-desc">
+        基准日 {{ cleanupReport.as_of }}；已释放 {{ cleanupReport.totals['已释放行数'] }} 行，
+        暂缓留存 {{ cleanupReport.totals['留存行数'] }} 行，
+        本轮可释放 {{ cleanupReport.totals['本轮可释放行数'] }} 行。
+      </p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>分区</th><th>截止日</th><th>数据行数</th><th>已释放</th>
+            <th>剩余</th><th>状态</th><th>暂缓理由</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="part in cleanupReport.partitions" :key="part.分区">
+            <td>{{ part.分区 }}</td>
+            <td>{{ part.截止日 }}</td>
+            <td>{{ part.数据行数 }}</td>
+            <td>{{ part.已释放行数 }}</td>
+            <td>{{ part.剩余行数 }}</td>
+            <td>{{ part.状态 }}</td>
+            <td>{{ part.暂缓理由 || '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="cleanupReport.active_holds.length" class="status-legend">
+        <span v-for="hold in cleanupReport.active_holds" :key="hold.调查申请编号" class="legend-item">
+          {{ hold.调查申请编号 }}：{{ hold.暂缓理由 }}（留存 {{ hold.留存行数 }} 行）
+        </span>
+      </p>
+    </section>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条{{ meta.name }}记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -100,16 +142,36 @@ import {
   createEntry,
   downloadEntries,
   listEntries,
+  loadCleanupReport,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/backend-service'
 import type { EntryRow } from '@/data/types'
+
+type CleanupPartition = {
+  分区: string
+  截止日: string
+  数据行数: number
+  已释放行数: number
+  剩余行数: number
+  状态: string
+  暂缓理由: string
+}
+
+type CleanupReport = {
+  asset: string
+  as_of: string
+  partitions: CleanupPartition[]
+  totals: Record<string, number>
+  active_holds: { 调查申请编号: string; 暂缓理由: string; 留存行数: number }[]
+}
 
 const props = defineProps<{ moduleKey: string }>()
 const meta = moduleMeta(props.moduleKey)
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
+const cleanupReport = ref<CleanupReport | null>(null)
 const filters = ref<Record<string, string>>({})
 const filterFields = meta.fields.slice(0, 3)
 const showCreate = ref(false)
@@ -171,8 +233,17 @@ async function runAction(action: string, row: EntryRow) {
     const result = await applyAction(meta.key, Number(row.id), action)
     if (!result.ok) throw new Error(result.message)
     await reload()
+    if (meta.key === 'retention_job') await showCleanupReport(row)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '操作失败'
+  }
+}
+
+async function showCleanupReport(row: EntryRow) {
+  try {
+    cleanupReport.value = (await loadCleanupReport(meta.key, Number(row.id))) as CleanupReport
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '清理对账读取失败'
   }
 }
 

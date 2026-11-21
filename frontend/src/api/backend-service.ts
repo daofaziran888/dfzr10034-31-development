@@ -59,3 +59,15 @@ export async function loadOverview(): Promise<OverviewResult> {
   if (!response.ok) throw new Error('运营概览读取失败')
   return await response.json()
 }
+
+/** 保留清理的分区对账：清理明细、留存行数与仍有效的调查范围。 */
+export async function loadCleanupReport(
+  key: string,
+  id: number,
+  asOf?: string,
+): Promise<Record<string, unknown>> {
+  const query = asOf ? `?${new URLSearchParams({ as_of: asOf }).toString()}` : ''
+  const response = await request(`/api/${key}/${id}/cleanup-report${query}`)
+  if (!response.ok) throw new Error('清理对账读取失败')
+  return await response.json()
+}
